@@ -11,8 +11,6 @@
 
 namespace Icybee\Modules\Journal;
 
-use ICanBoogie\ActiveRecord\Query;
-
 class ManageBlock extends \Icybee\ManageBlock
 {
 	public function __construct(Module $module, array $attributes=array())
@@ -26,86 +24,77 @@ class ManageBlock extends \Icybee\ManageBlock
 		);
 	}
 
-	protected function columns()
+	protected function get_available_columns()
 	{
 		return array
 		(
-			'message' => array
+			'message' =>   __CLASS__ . '\MessageColumn',
+			'severity' =>  __CLASS__ . '\SeverityColumn',
+			'type' =>      __CLASS__ . '\TypeColumn',
+			'class' =>     __CLASS__ . '\ClassColumn',
+			'uid' =>       'Icybee\Modules\Users\ManageBlock\UserColumn',
+			'timestamp' => 'Icybee\ManageBlock\DateTimeColumn'
+		);
+	}
+}
+
+namespace Icybee\Modules\Journal\ManageBlock;
+
+use ICanBoogie\ActiveRecord\Query;
+
+use Icybee\ManageBlock\Column;
+use Icybee\ManageBlock\FilterDecorator;
+use Icybee\Modules\Journal\Entry;
+
+/**
+ * Representation of the `message` column.
+ */
+class MessageColumn extends Column
+{
+	public function __construct(\Icybee\ManageBlock $manager, $id, array $options=array())
+	{
+		parent::__construct
+		(
+			$manager, $id, $options + array
 			(
-				'label' => 'Message',
 				'discreet' => true
-			),
-
-			'severity' => array
-			(
-				'label' => 'Severity',
-				'discreet' => true
-			),
-
-			'type' => array
-			(
-				'label' => 'Type',
-				'discreet' => true
-			),
-
-			'class' => array
-			(
-				'label' => 'Class',
-				'discreet' => true
-			),
-
-			'uid' => array
-			(
-				'sortable' => true
-			),
-
-			'timestamp' => array
-			(
-				'label' => 'Date',
-				'class' => 'date'
 			)
 		);
 	}
 
-	protected function get_query_conditions(array $options)
+	public function render_cell($record)
 	{
-		unset($options['filters']['class']);
+		return $record->{ $this->id };
+	}
+}
 
-		return  parent::get_query_conditions($options);
+/**
+ * Representation of the `severity` column.
+ */
+class SeverityColumn extends Column
+{
+	public function __construct(\Icybee\ManageBlock $manager, $id, array $options=array())
+	{
+		parent::__construct
+		(
+			$manager, $id, $options + array
+			(
+				'discreet' => true,
+				'filters' => array
+				(
+					'options' => array
+					(
+						'=' . Entry::SEVERITY_DEBUG => 'Debug',
+						'=' . Entry::SEVERITY_INFO => 'Info',
+						'=' . Entry::SEVERITY_WARNING => 'Warning',
+						'=' . Entry::SEVERITY_DANGER => 'Danger'
+					)
+				)
+			)
+		);
 	}
 
-	protected function alter_query(Query $query, array $filters)
-	{
-		$class = null;
-
-		if (!empty($filters['class']))
-		{
-			$class = $filters['class'];
-
-			unset($filters['class']);
-		}
-
-		$query = parent::alter_query($query, $filters);
-
-		if ($class)
-		{
-			list($type, $name) = explode(':', $class);
-
-			if ($type == 'operation')
-			{
-				$query->where('class LIKE ?', '%\\' . $name . 'Operation');
-			}
-		}
-
-		return $query;
-	}
-
-	protected function render_cell_message($record, $property)
-	{
-		return $record->$property;
-	}
-
-	protected function render_cell_severity($record, $property)
+	public function render_cell($record)
 	{
 		static $labels = array
 		(
@@ -115,84 +104,69 @@ class ManageBlock extends \Icybee\ManageBlock
 			Entry::SEVERITY_DANGER => '<span class="label label-danger">danger</span>'
 		);
 
-		$value = $record->$property;
+		$value = $record->{ $this->id };
 		$label = $labels[$value];
 
-		return $this->render_filter_cell($record, $property, $label);
+		return new FilterDecorator($record, $this->id, $this->is_filtering, $label);
 	}
+}
 
-	protected function render_cell_type($record, $property)
+/**
+ * Representation of the `type` column.
+ */
+class TypeColumn extends Column
+{
+	public function __construct(\Icybee\ManageBlock $manager, $id, array $options=array())
 	{
-		return $this->render_filter_cell($record, $property, $this->t($record->$property, array(), array('scope' => 'type')));
-	}
-
-	/**
-	 * Extends the "uid" column by providing users filters.
-	 *
-	 * @param array $column
-	 * @param string $id
-	 */
-	protected function extend_column_uid(array $column, $id, array $fields)
-	{
-		global $core;
-
-		$users_keys = $this->module->model->select('DISTINCT uid')->where('siteid = ?', $core->site_id)->all(\PDO::FETCH_COLUMN);
-
-		if (!$users_keys || count($users_keys) == 1)
-		{
-			return array
-			(
-				'sortable' => false
-			)
-
-			+ parent::extend_column($column, $id, $fields);
-		}
-
-		$users = $core->models['users']->select('CONCAT("=", uid), IF((firstname != "" AND lastname != ""), CONCAT_WS(" ", firstname, lastname), username) name')->where(array('uid' => $users_keys))->order('name')->pairs;
-
-		return array
+		parent::__construct
 		(
-			'filters' => array
+			$manager, $id, $options + array
 			(
-				'options' => $users
+				'discreet' => true
 			)
-		)
-
-		+ parent::extend_column($column, $id, $fields);
+		);
 	}
 
-	private $last_rendered_uid;
-
-	protected function render_cell_uid($record, $property)
+	public function render_cell($record)
 	{
-		$uid = $record->uid;
+		return new FilterDecorator($record, $this->id, $this->is_filtering, $this->t($record->{ $this->id }, array(), array('scope' => 'type')));
+	}
+}
 
-		if ($this->last_rendered_uid === $uid)
-		{
-			return self::REPEAT_PLACEHOLDER;
-		}
-
-		$this->last_rendered_uid = $uid;
-
-		if ($uid)
-		{
-			$label = $this->render_cell_user($record, $property);
-		}
-		else
-		{
-			$label = $this->t('Guest');
-		}
-
-		return parent::render_filter_cell($record, $property, $label);
+/**
+ * Representation of the `class` column.
+ */
+class ClassColumn extends Column
+{
+	public function __construct(\Icybee\ManageBlock $manager, $id, array $options=array())
+	{
+		parent::__construct
+		(
+			$manager, $id, $options + array
+			(
+				'discreet' => true
+			)
+		);
 	}
 
-	protected function render_cell_timestamp($record, $property)
+	public function alter_query_with_filter(Query $query, $filter_value)
 	{
-		return $this->render_cell_datetime($record, $property);
+		if ($filter_value)
+		{
+			list($type, $name) = explode(':', $filter_value);
+
+			if ($type == 'operation')
+			{
+				$query->and('class LIKE ?', '%\\' . $name . 'Operation');
+			}
+		}
+
+		return $query;
 	}
 
-	protected function render_cell_class($record, $property)
+	public function render_cell($record)
 	{
+		$property = $this->id;
 		$class_name = $record->$property;
 
 		if (is_subclass_of($class_name, 'ICanBoogie\Operation'))
@@ -200,7 +174,7 @@ class ManageBlock extends \Icybee\ManageBlock
 			$path = strtr($class_name, '\\', '/');
 			$basename = basename($path, 'Operation');
 
-			return $this->render_filter_cell($record, $property, $basename, 'operation:' . $basename);
+			return new FilterDecorator($record, $property, $this->is_filtering, $basename, 'operation:' . $basename);
 		}
 	}
 }
